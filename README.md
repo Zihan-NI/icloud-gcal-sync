@@ -15,24 +15,25 @@ Apple Calendar ──change notification──▶ ┐
 Google Calendar ──poll every 60 s─────▶ ┘  SQLite: pairings + per-side hashes
 ```
 
-- **Apple side: EventKit.** No app-specific password. macOS asks once for calendar access. Only calendars of your iCloud account are read or written.
+- **Apple side: EventKit.** No app-specific password. macOS asks once for calendar access. By default only calendars of your iCloud account are read or written.
 - **Google side: Calendar API**, incremental sync, polled every 60 seconds. The OAuth scope is `calendar.app.created`: the tool can only touch the calendar it created itself, never your other Google calendars.
 - **Apple → Google.** Every event in the sync window (30 days back to 365 days ahead) gets a copy in the Google calendar. Recurring events are copied as individual occurrences.
-- **Google → Apple.** An event created in the Google calendar is created in the iCloud calendar *From Google*.
-- **Edits and deletions** of single events travel in both directions. If both copies were edited between two syncs, the newer edit wins. An edit beats a deletion.
+- **Google → Apple.** An event created in the Google calendar is created in the iCloud calendar *From Google*. That calendar is synced like any other iCloud calendar, so the two stay one pair.
+- **Edits and deletions** of single events travel in both directions. This includes deletions: deleting the Google copy of an event deletes the event in iCloud. If both copies were edited between two syncs, the newer edit wins. An edit beats a deletion.
 - **Loop prevention.** For each pair the tool remembers a hash of what each side looked like when they last agreed. A change notification caused by its own write matches the hash and is ignored.
 
 ### Safety
 
 - Nothing is written unless both sides were read successfully.
-- If one run would delete many events (more than 50 Google copies after a sudden drop on the Apple side, or more than 10 Apple events), the run changes nothing and shows a notification. Run `icloud-gcal-sync sync --allow-mass-delete` if the deletion is intended.
+- If one run would delete many events (more than 50 Google copies after a sudden drop on the Apple side, more than 10 Apple events, or more than 3 events while the other side reads as completely empty), the run changes nothing and shows a notification. Run `sync --allow-mass-delete` if the deletion is intended (see *Operating it* for the full command).
 - If you delete the Google calendar, the tool creates a new one and copies everything again. It does not delete your Apple events.
 - Google copies of Apple events carry no reminders, so you are not alerted twice.
-- Events outside the sync window are left alone.
+- Events outside the sync window are left alone. An event counts by its start time; once it is more than 30 days old its Google copy stays as history and is no longer updated.
 
 ### Limitations
 
 - **Recurring events are one-way.** Occurrences are copied from Apple to Google. Editing or deleting such a copy in Google does not change the Apple event, and a deleted copy comes back. Recurring events created in Google are not copied to Apple.
+- Events in a read-only iCloud calendar (for example one shared with you without edit rights) are one-way in the same manner.
 - Only title, time, location, notes and free/busy are synced. Guests, attachments and alerts are not.
 - If you added your Google account to Apple Calendar, hide the *iCloud Sync* calendar there (uncheck it in the sidebar), or you will see every event twice.
 - Apple Reminders are not synced.
@@ -40,7 +41,7 @@ Google Calendar ──poll every 60 s─────▶ ┘  SQLite: pairings + 
 
 ## Setup (≈15 minutes)
 
-Requires macOS 14 or later and Xcode or the Xcode Command Line Tools (for `swift build`).
+Requires macOS 14 or later and Xcode 16 or later, or the matching Command Line Tools (Swift 6, for `swift build`).
 
 ```bash
 git clone https://github.com/<you>/icloud-gcal-sync.git
@@ -73,11 +74,15 @@ Tell your AI assistant to create events in the **iCloud Sync** calendar, not in 
 
 | Item | What it does |
 |---|---|
-| Status lines | What the sync is doing now, when it last succeeded, how many events are paired, and what to do if something needs your attention |
+| Status lines | What the sync is doing now, when it last succeeded, how many events are paired, and the reason when something is stuck |
 | **Sync Now** | Runs a sync immediately instead of waiting for the next change or poll |
 | **Refresh** | Re-reads `config.json` and compares against the whole Google calendar, not only the changes since the last sync. Use it after editing the configuration or if the two sides look out of step |
 | **Choose Google Credentials (JSON)…** | Installs the OAuth client file and starts the Google sign-in |
 | **Sign In to Google…** | Shown when the sign-in has expired or was not finished |
+| **Switch Google Account…** | Shown while signed in. A new calendar is created in the account you sign in with and everything is copied again; the calendar in the old account is left as it is |
+| **Cancel Sign-In** | Shown while the browser sign-in is waiting |
+| **How It Works…** | The rules in five lines: what is copied where, and what is not. Opens by itself after the first successful sync |
+| **Setup Guide…** | Shown until the OAuth client file has been chosen: the steps above in short. Opens by itself the first time |
 | **Open Log** | Opens `sync.log` |
 
 The icon changes to a calendar with an exclamation mark when something needs attention. To run without an icon, start the program with `run --headless` and set Google up from the command line: save the client file as `~/Library/Application Support/icloud-gcal-sync/credentials.json` and run `icloud-gcal-sync auth`.
@@ -99,18 +104,24 @@ Optional. Create `~/Library/Application Support/icloud-gcal-sync/config.json`; s
 | `past_days` / `future_days` | 30 / 365 | Sync window |
 | `max_deletes_per_run` | 50 | Mass-deletion guard for Google copies |
 | `max_apple_deletes_per_run` | 10 | Mass-deletion guard for Apple events |
-| `google_poll_seconds` | 60 | How often Google is checked for changes |
+| `google_poll_seconds` | 60 | How often Google is checked for changes (at least 15) |
+| `debounce_seconds` | 5 | How long to wait after an Apple Calendar change before syncing, so that a burst of changes is handled once |
 | `conflict_policy` | `newest` | `newest`, or `apple` to let the Apple copy always win |
 
 ## Operating it
 
+The installed program is not on your `PATH`. Either call it by its full path or define a shortcut first:
+
 ```bash
-icloud-gcal-sync status             # last successful sync, number of paired events
-icloud-gcal-sync calendars          # which Apple calendars are synced
-icloud-gcal-sync sync --dry-run     # show what a sync would change
+alias icloud-gcal-sync="$HOME/Library/Application Support/icloud-gcal-sync/bin/icloud-gcal-sync"
+
+icloud-gcal-sync status                    # last successful sync, number of paired events
+icloud-gcal-sync calendars                 # which Apple calendars are synced
+icloud-gcal-sync sync --dry-run            # show what a sync would change
+icloud-gcal-sync sync --allow-mass-delete  # apply a sync that the deletion guard paused
 ```
 
-The installed binary is `~/Library/Application Support/icloud-gcal-sync/bin/icloud-gcal-sync`. Run from a terminal, `calendars` and `sync` use the terminal's own calendar permission, which macOS asks for separately from the background agent's.
+Run from a terminal, `calendars` and `sync` use the terminal's own calendar permission, which macOS asks for separately from the background agent's.
 
 - Logs: `~/Library/Application Support/icloud-gcal-sync/logs/sync.log`
 - Uninstall: `scripts/uninstall.sh` (add `--purge` to also remove the configuration, token and database). Then remove *icloud-gcal-sync* under System Settings → Privacy & Security → Calendars.
@@ -124,7 +135,7 @@ The Python one-way version is kept in `legacy/` for reference.
 2. Copy `secrets/credentials.json` and `secrets/token.json` to `~/Library/Application Support/icloud-gcal-sync/`. The token is reused; you do not need to sign in again.
 3. Run `scripts/install.sh`.
 
-The existing Google copies are recognized by their event UID and adopted, not deleted and recreated. The iCloud app-specific password is no longer needed; you can revoke it at [account.apple.com](https://account.apple.com).
+The existing Google copies are recognized by their event UID (and, for repeating events, the occurrence time) and adopted where the match is unambiguous; a copy that cannot be matched is replaced by a fresh one. The Google calendar keeps its old description, which still says the mirror is one-way; edit it in Google Calendar if an assistant reads it. The iCloud app-specific password is no longer needed; you can revoke it at [account.apple.com](https://account.apple.com).
 
 ## License
 

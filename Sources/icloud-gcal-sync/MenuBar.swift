@@ -11,6 +11,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var status = DaemonStatus()
     private var isOpen = false
     private weak var headlineItem: NSMenuItem?
+    private var presentingGuide = false
+    /// Guides already offered since launch, so a marker file that cannot be written does
+    /// not make a guide reappear on every status update.
+    private var offered: Set<String> = []
+    static let readmeURL = URL(string: "https://github.com/Zihan-NI/icloud-gcal-sync#readme")!
 
     init(daemon: Daemon) {
         self.daemon = daemon
@@ -38,6 +43,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // While it is open only the first line follows the state; the rest is rebuilt the
         // next time it opens.
         if isOpen { headlineItem?.title = shortened(headline) }
+        offerGuideIfDue()
     }
 
     // MARK: - Menu
@@ -120,6 +126,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         } else if hasCredentials {
             action(signedOut ? "Sign In to Google…" : "Switch Google Account…", #selector(signIn))
         }
+        menu.addItem(.separator())
+        if !hasCredentials { action("Setup Guide…", #selector(showSetupGuide)) }
+        action("How It Works…", #selector(showHowItWorks))
         action("Open Log", #selector(openLog))
     }
 
@@ -165,6 +174,83 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
         }
+    }
+
+    // MARK: - Guides
+
+    /// Each guide opens by itself once: the setup steps when Google is not set up yet, and
+    /// the rules of the road after the first successful sync. Both stay available in the menu.
+    private enum Guide: String { case setup = ".setup_guide_shown", howItWorks = ".how_it_works_shown" }
+
+    private func offerGuideIfDue() {
+        // Never on top of the menu, another dialog, or a sign-in that is waiting for the browser.
+        guard !presentingGuide, !isOpen, !status.signingIn, NSApp.modalWindow == nil else { return }
+        let due: Guide
+        switch status.state {
+        case .needsCredentials: due = .setup
+        case .idle where status.lastSuccess != nil: due = .howItWorks
+        default: return
+        }
+        let marker = daemon.paths.root.appendingPathComponent(due.rawValue)
+        guard !offered.contains(due.rawValue), !FileManager.default.fileExists(atPath: marker.path) else { return }
+        offered.insert(due.rawValue)
+        FileManager.default.createFile(atPath: marker.path, contents: nil)
+        // Not from inside show(): a modal alert must not run while the status is being delivered.
+        DispatchQueue.main.async { due == .setup ? self.showSetupGuide() : self.showHowItWorks() }
+    }
+
+    @objc private func showSetupGuide() {
+        guard !presentingGuide else { return }
+        presentingGuide = true
+        defer { presentingGuide = false }
+        let alert = NSAlert()
+        alert.messageText = "Set up Google Calendar access"
+        alert.informativeText = """
+            The sync talks to Google through an OAuth client that you create in your own Google Cloud project, so your calendar data goes to nobody else. You do this once.
+
+            1. In Google Cloud Console, create a project and enable the Google Calendar API.
+            2. Under Google Auth Platform, choose External and publish the app (or Internal, if you use Google Workspace).
+            3. Under Clients, create a client of type “Desktop app” and download its JSON file.
+            4. Click “Choose File…” below and pick that file. Your browser then opens for the Google sign-in.
+
+            “Open Step-by-Step Guide” shows the README, which has a link for each step.
+            """
+        alert.addButton(withTitle: "Choose File…")
+        alert.addButton(withTitle: "Open Step-by-Step Guide")
+        alert.addButton(withTitle: "Later")
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: chooseCredentials()
+        case .alertSecondButtonReturn: NSWorkspace.shared.open(MenuBarController.readmeURL)
+        default: break
+        }
+    }
+
+    @objc private func showHowItWorks() {
+        guard !presentingGuide else { return }
+        presentingGuide = true
+        defer { presentingGuide = false }
+        let google = status.googleCalendarName.isEmpty ? "iCloud Sync" : status.googleCalendarName
+        let target = status.appleTargetCalendar.isEmpty ? "From Google" : status.appleTargetCalendar
+        let alert = NSAlert()
+        alert.messageText = "How syncing works"
+        alert.informativeText = """
+            • Events in your iCloud calendars are copied to the Google calendar “\(google)” within seconds.
+
+            • Events created in “\(google)”, by you or by an AI assistant, are copied to the iCloud calendar “\(target)” within about a minute. Events in your other Google calendars, including the main one, are not synced.
+
+            • Editing or deleting a single event on either side changes the other side too: deleting it in Google deletes it in iCloud. Repeating events only go from iCloud to Google.
+
+            • If your Google account is also added to Apple Calendar, uncheck “\(google)” in Calendar’s sidebar. Otherwise every event shows twice.
+
+            • Syncing runs while this Mac is awake, and catches up after sleep.
+
+            You can open this again from the menu bar icon.
+            """
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Open README")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertSecondButtonReturn { NSWorkspace.shared.open(MenuBarController.readmeURL) }
     }
 
     @objc private func openLog() {
