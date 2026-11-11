@@ -173,3 +173,15 @@ def test_window_filter_consistent_between_sides():
     # An all-day event on the window's first day must be "in window" on both sides.
     body = {"start": {"date": "2026-10-01"}}
     assert sync.google_event_start(body) == sync.start_instant(dt.date(2026, 10, 1)) == WIN_START
+
+
+def test_is_transient_follows_cause_chain():
+    try:
+        try:
+            raise TimeoutError("timed out")
+        except TimeoutError as inner:
+            raise RuntimeError("wrapped") from inner
+    except RuntimeError as e:
+        assert sync.is_transient(e)
+    assert not sync.is_transient(FileNotFoundError("credentials.json"))
+    assert not sync.is_transient(ValueError("bad data"))

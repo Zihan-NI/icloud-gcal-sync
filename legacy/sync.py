@@ -18,7 +18,9 @@ import logging
 import logging.handlers
 import os
 import re
+import socket
 import sys
+import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -210,7 +212,7 @@ def read_keychain_password(username: str, timeout: int = 30) -> str | None:
         out = subprocess.run([sys.executable, "-c", code, KEYRING_SERVICE, username],
                              capture_output=True, text=True, timeout=timeout, check=True)
     except subprocess.TimeoutExpired:
-        raise TimeoutError("Keychain read timed out (access prompt?); re-run setup_auth.py in Terminal")
+        raise RuntimeError("Keychain read timed out (access prompt?); re-run setup_auth.py in Terminal")
     return out.stdout or None
 
 
@@ -524,6 +526,22 @@ def setup_logging(verbose: bool) -> None:
     log.setLevel(logging.DEBUG if verbose else logging.INFO)
 
 
+NETWORK_RETRIES = 3
+NETWORK_RETRY_DELAY = 30
+
+
+def is_transient(exc: BaseException) -> bool:
+    """True if the error chain contains a network failure (timeout, DNS, refused connection)."""
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, (ConnectionError, TimeoutError, socket.gaierror)) \
+                or type(exc).__name__ in ("ServerNotFoundError", "TransportError"):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--dry-run", action="store_true", help="show the plan without writing to Google")
@@ -538,12 +556,23 @@ def main() -> None:
         except BlockingIOError:
             log.warning("another sync is running; exiting")
             return
-        try:
-            run(args.dry_run, args.allow_mass_delete)
-        except (Exception, SystemExit) as e:
-            log.exception("sync failed")
-            notify(f"Sync failed: {e}. Check logs/sync.log")
-            sys.exit(1)
+        for attempt in range(NETWORK_RETRIES + 1):
+            try:
+                run(args.dry_run, args.allow_mass_delete)
+                return
+            except Exception as e:
+                # Right after the Mac wakes, Wi-Fi is often not up yet; wait instead of failing.
+                if is_transient(e) and attempt < NETWORK_RETRIES:
+                    log.warning("network error (%s); retrying in %ds", e.__class__.__name__, NETWORK_RETRY_DELAY)
+                    time.sleep(NETWORK_RETRY_DELAY)
+                    continue
+                log.exception("sync failed")
+                notify(f"Sync failed: {e}. Check logs/sync.log")
+                sys.exit(1)
+            except SystemExit as e:
+                log.exception("sync failed")
+                notify(f"Sync failed: {e}. Check logs/sync.log")
+                sys.exit(1)
 
 
 if __name__ == "__main__":
