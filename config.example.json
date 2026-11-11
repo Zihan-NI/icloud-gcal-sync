@@ -1,8 +1,13 @@
 {
-  "icloud_username": "you@example.com",
+  "apple_source": "iCloud",
   "icloud_calendars": [],
+  "apple_target_calendar": "From Google",
   "google_calendar_name": "iCloud Sync",
   "past_days": 30,
   "future_days": 365,
-  "max_deletes_per_run": 50
+  "max_deletes_per_run": 50,
+  "max_apple_deletes_per_run": 10,
+  "google_poll_seconds": 60,
+  "debounce_seconds": 5,
+  "conflict_policy": "newest"
 }
