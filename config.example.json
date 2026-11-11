@@ -1,0 +1,8 @@
+{
+  "icloud_username": "you@example.com",
+  "icloud_calendars": [],
+  "google_calendar_name": "iCloud Sync",
+  "past_days": 30,
+  "future_days": 365,
+  "max_deletes_per_run": 50
+}
