@@ -1,0 +1,55 @@
+#!/bin/bash
+# Runs as the installing user after a "for me only" installation. Writes the LaunchAgent
+# (it needs the absolute path of this user's home) and starts the agent.
+set -u
+
+# The installer passes the install location as $2: for a per-user installation that is
+# <home>/Library/Application Support/icloud-gcal-sync, the application folder itself.
+SUFFIX="/Library/Application Support/icloud-gcal-sync"
+case "${2:-}" in
+  */Library/Application\ Support/icloud-gcal-sync) HOME_DIR="${2%"$SUFFIX"}" ;;
+  *) HOME_DIR="$HOME" ;;
+esac
+[ -d "$HOME_DIR/Library" ] || { echo "postinstall: cannot determine the home directory (got '${2:-}')" >&2; exit 1; }
+LABEL="com.github.icloud-gcal-sync"
+APP_HOME="$HOME_DIR/Library/Application Support/icloud-gcal-sync"
+BIN="$APP_HOME/bin/icloud-gcal-sync"
+PLIST="$HOME_DIR/Library/LaunchAgents/$LABEL.plist"
+DOMAIN="gui/$(id -u)"
+
+xml_escape() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+
+mkdir -p "$APP_HOME/logs" "$HOME_DIR/Library/LaunchAgents"
+# The folder holds the Google token and the database.
+chmod 700 "$APP_HOME"
+chmod 755 "$BIN" "$APP_HOME/bin/uninstall.sh"
+
+cat > "$PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$(xml_escape "$BIN")</string>
+    <string>run</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>$(xml_escape "$APP_HOME/logs/launchd.out.log")</string>
+  <key>StandardErrorPath</key><string>$(xml_escape "$APP_HOME/logs/launchd.err.log")</string>
+</dict>
+</plist>
+PLIST
+
+# Replace a running copy (an update, or an earlier install from source).
+launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null
+for attempt in 1 2 3 4 5; do
+  launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null && break
+  sleep 2
+done
+# Never fail the installation over the start: the agent also starts at the next login.
+exit 0
