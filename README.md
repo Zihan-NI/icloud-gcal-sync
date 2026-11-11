@@ -45,7 +45,6 @@ Requires macOS 14 or later and Xcode or the Xcode Command Line Tools (for `swift
 ```bash
 git clone https://github.com/<you>/icloud-gcal-sync.git
 cd icloud-gcal-sync
-mkdir -p ~/Library/Application\ Support/icloud-gcal-sync
 ```
 
 ### 1. Google OAuth client
@@ -55,20 +54,33 @@ mkdir -p ~/Library/Application\ Support/icloud-gcal-sync
 3. Under [Google Auth Platform](https://console.cloud.google.com/auth/overview), click **Get started**:
    - **Audience → Internal** if you are on Google Workspace.
    - Otherwise choose **External**, then go to **Audience** and click **Publish app**. Apps left in *Testing* mode get refresh tokens that expire after 7 days, and syncing then stops.
-4. Go to [Clients](https://console.cloud.google.com/auth/clients) → **Create client** → **Desktop app** → **Download JSON**.
-5. Save the file as `~/Library/Application Support/icloud-gcal-sync/credentials.json`.
+     Publishing requires an app name, a support email, a home page and a privacy policy link on the **Branding** page. You can use this repository's URL and the link to its [PRIVACY.md](PRIVACY.md). Do not upload a logo: that starts Google's verification process, which a personal installation does not need.
+4. Go to [Clients](https://console.cloud.google.com/auth/clients) → **Create client** → **Desktop app** → **Download JSON**. Leave the file in your Downloads folder.
 
-### 2. Build, authorize, install
+### 2. Install and sign in
 
 ```bash
-scripts/build.sh                    # builds dist/icloud-gcal-sync and signs it (see "Signing" below)
-dist/icloud-gcal-sync auth          # a browser opens for Google; creates the "iCloud Sync" calendar
-scripts/install.sh                  # installs the background agent and starts it
+scripts/install.sh                  # builds, signs (see "Signing" below), installs the background agent and starts it
 ```
 
-macOS then asks once whether *icloud-gcal-sync* may access your calendars. Allow full access. The first sync follows immediately.
+macOS asks once whether *icloud-gcal-sync* may access your calendars. Allow full access.
+
+A calendar icon appears in the menu bar. Click it, choose **Choose Google Credentials (JSON)…** and pick the file you downloaded. A browser opens for the Google sign-in; when you have agreed, the first sync starts.
 
 Tell your AI assistant to create events in the **iCloud Sync** calendar, not in your primary Google calendar. The tool cannot see the primary calendar.
+
+### The menu bar icon
+
+| Item | What it does |
+|---|---|
+| Status lines | What the sync is doing now, when it last succeeded, how many events are paired, and what to do if something needs your attention |
+| **Sync Now** | Runs a sync immediately instead of waiting for the next change or poll |
+| **Refresh** | Re-reads `config.json` and compares against the whole Google calendar, not only the changes since the last sync. Use it after editing the configuration or if the two sides look out of step |
+| **Choose Google Credentials (JSON)…** | Installs the OAuth client file and starts the Google sign-in |
+| **Sign In to Google…** | Shown when the sign-in has expired or was not finished |
+| **Open Log** | Opens `sync.log` |
+
+The icon changes to a calendar with an exclamation mark when something needs attention. To run without an icon, start the program with `run --headless` and set Google up from the command line: save the client file as `~/Library/Application Support/icloud-gcal-sync/credentials.json` and run `icloud-gcal-sync auth`.
 
 ### Signing
 
@@ -76,7 +88,7 @@ macOS remembers the calendar permission against the program's code signature. An
 
 ## Configuration
 
-Optional. Create `~/Library/Application Support/icloud-gcal-sync/config.json`; see `config.example.json`. Restart the agent after changing it (`scripts/install.sh`).
+Optional. Create `~/Library/Application Support/icloud-gcal-sync/config.json`; see `config.example.json`. Choose **Refresh** in the menu bar after changing it.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -109,8 +121,8 @@ The installed binary is `~/Library/Application Support/icloud-gcal-sync/bin/iclo
 The Python one-way version is kept in `legacy/` for reference.
 
 1. Stop the old agent: `launchctl bootout gui/$(id -u)/com.$(whoami).icloud-gcal-sync && rm ~/Library/LaunchAgents/com.$(whoami).icloud-gcal-sync.plist`
-2. Copy `secrets/credentials.json` and `secrets/token.json` to `~/Library/Application Support/icloud-gcal-sync/`. The token is reused; you do not need to authorize again.
-3. Follow *Build, authorize, install* above (skip `auth` if you copied the token).
+2. Copy `secrets/credentials.json` and `secrets/token.json` to `~/Library/Application Support/icloud-gcal-sync/`. The token is reused; you do not need to sign in again.
+3. Run `scripts/install.sh`.
 
 The existing Google copies are recognized by their event UID and adopted, not deleted and recreated. The iCloud app-specific password is no longer needed; you can revoke it at [account.apple.com](https://account.apple.com).
 

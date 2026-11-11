@@ -41,8 +41,12 @@ security lock-keychain "$SIGNING_KEYCHAIN"
 codesign -f -s "$SIGNING_NAME" --keychain "$SIGNING_KEYCHAIN" --identifier "$BUNDLE_ID" "$tmp/b1" 2>/dev/null || fail "codesign after unlock"
 
 # 4. dry runs print the plist and valid XML; purge refuses dangerous paths.
-touch "$ICLOUD_GCAL_SYNC_HOME/token.json"
 "$here/install.sh" --dry-run > "$tmp/dry.txt"
+grep -q 'Choose Google Credentials' "$tmp/dry.txt" || fail "no setup guidance without credentials"
+touch "$ICLOUD_GCAL_SYNC_HOME/credentials.json"
+"$here/install.sh" --dry-run | grep -q 'Sign In to Google' || fail "no sign-in guidance without a token"
+touch "$ICLOUD_GCAL_SYNC_HOME/token.json"
+if "$here/install.sh" --dry-run | grep -q 'click the icon and pick'; then fail "setup guidance shown although set up"; fi
 grep -q 'ICLOUD_GCAL_SYNC_HOME' "$tmp/dry.txt" || fail "env var missing from plist"
 grep -q 'launchctl bootstrap' "$tmp/dry.txt" || fail "bootstrap not printed"
 if ICLOUD_GCAL_SYNC_HOME=/ "$here/uninstall.sh" --purge --dry-run >/dev/null 2>&1; then fail "purge / allowed"; fi

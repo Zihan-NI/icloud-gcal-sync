@@ -34,9 +34,11 @@ final class LoopbackListener {
 
     /// Waits for the redirect carrying `code` (or `error`). Browsers also fetch /favicon.ico or
     /// open speculative connections; those are answered 404 / ignored and the wait continues.
-    func waitForCode(expectedState: String, timeout: TimeInterval) throws -> String {
+    func waitForCode(expectedState: String, timeout: TimeInterval, isCancelled: () -> Bool = { false }) throws -> String {
         let deadline = Date().addingTimeInterval(timeout)
         while true {
+            // Checked once a second (the poll timeout below), so a cancelled sign-in ends promptly.
+            if isCancelled() { throw GoogleAPIError.unauthorized("sign-in cancelled") }
             let remaining = deadline.timeIntervalSinceNow
             if remaining <= 0 { throw GoogleAPIError.unauthorized("timed out waiting for the browser authorization (5 minutes)") }
             var p = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
@@ -63,7 +65,7 @@ final class LoopbackListener {
                 reply(c, status: "200 OK", html: "Authorization was not granted (\(htmlEscape(e))). You can close this tab.")
                 throw GoogleAPIError.unauthorized("authorization denied: \(e)")
             }
-            reply(c, status: "200 OK", html: "Authorization complete. You can close this tab and return to the terminal.")
+            reply(c, status: "200 OK", html: "Authorization complete. You can close this tab.")
             return params["code"]!
         }
     }

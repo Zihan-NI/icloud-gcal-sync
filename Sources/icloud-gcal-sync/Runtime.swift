@@ -109,12 +109,11 @@ final class Runtime {
     }
 
     /// Run a cycle under the cross-process lock, log the outcome and raise notifications.
-    /// Returns false when the cycle failed, was blocked, or another process held the lock.
     @discardableResult
-    func lockedCycle(_ options: SyncEngine.Options) -> Bool {
+    func lockedCycle(_ options: SyncEngine.Options) -> CycleOutcome {
         guard let lock = FileLock(paths.lock) else {
             Log.warning("another sync is running; skipping this cycle")
-            return false
+            return .busy
         }
         defer { lock.unlock() }
         do {
@@ -122,37 +121,38 @@ final class Runtime {
             if let reason = report.blockedReason {
                 Log.error("\(reason); nothing was changed. If this is intended run: icloud-gcal-sync sync --allow-mass-delete")
                 Notifier.post("Sync paused: \(reason)", category: "blocked", paths: paths)
-                return false
+                return .blocked(reason)
             }
             if !report.failures.isEmpty {
+                let message = "\(report.failures.count) events could not be synced"
                 failed("Sync finished with \(report.failures.count) errors. Check \(paths.logFile.path)")
-                return false
+                return .failed(message)
             }
             consecutiveFailures = 0
             if report.plan.actions.contains(where: { $0.writesCalendar }) || options.dryRun {
                 Log.info("done\(options.dryRun ? " (dry run, nothing written)" : "")")
             }
-            return true
+            return .ok(report)
         } catch let error as GoogleAPIError {
             Log.error("sync failed: \(error)")
             if case .unauthorized = error {
-                Notifier.post("Google sign-in expired. Run: icloud-gcal-sync auth", category: "auth", paths: paths)
-            } else {
-                failed("Sync failed: \(error)")
+                Notifier.post("Google sign-in expired. Sign in from the menu bar icon, or run: icloud-gcal-sync auth", category: "auth", paths: paths)
+                return .needsGoogleAuthorization
             }
-            return false
+            failed("Sync failed: \(error)")
+            return .failed("\(error)")
         } catch let error as AppleStoreError {
             Log.error("sync failed: \(error)")
             if case .accessDenied = error {
                 Notifier.post("No access to Apple Calendar: \(error)", category: "access", paths: paths)
-            } else {
-                failed("Sync failed: \(error)")
+                return .noCalendarAccess
             }
-            return false
+            failed("Sync failed: \(error)")
+            return .failed("\(error)")
         } catch {
             Log.error("sync failed: \(error)")
             failed("Sync failed: \(error)")
-            return false
+            return .failed("\(error)")
         }
     }
 
@@ -161,6 +161,19 @@ final class Runtime {
         consecutiveFailures += 1
         if consecutiveFailures >= 3 { Notifier.post(message, category: "failed", paths: paths) }
     }
+}
+
+enum CycleOutcome {
+    case ok(SyncEngine.Report)
+    /// A mass-delete guard refused the plan; nothing was changed.
+    case blocked(String)
+    case needsGoogleAuthorization
+    case noCalendarAccess
+    case failed(String)
+    /// Another process was syncing.
+    case busy
+
+    var succeeded: Bool { if case .ok = self { return true }; return false }
 }
 
 /// macOS notifications, throttled per kind of problem so that a harmless repeated failure

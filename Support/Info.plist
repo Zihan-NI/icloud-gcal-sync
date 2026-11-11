@@ -6,6 +6,7 @@
   <key>CFBundleName</key><string>icloud-gcal-sync</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleShortVersionString</key><string>2.0.0</string>
+  <key>LSUIElement</key><true/>
   <key>NSCalendarsFullAccessUsageDescription</key><string>icloud-gcal-sync keeps your Apple calendars and a dedicated Google calendar in sync.</string>
 </dict>
 </plist>

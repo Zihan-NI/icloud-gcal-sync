@@ -135,6 +135,20 @@ final class AuthTests: XCTestCase {
         XCTAssertNil(try TokenFile.read(env.tokenFile))
     }
 
+    func testCancelledSignInEndsPromptlyWithoutSavingToken() throws {
+        let auth = FakeTransport()
+        let env = try Env(token: nil, authTransport: auth)
+        let az = GoogleAuthorizer(client: Env.client, tokenFile: env.tokenFile, transport: auth, openURL: { _ in })
+        let started = Date()
+        var polls = 0
+        XCTAssertThrowsError(try az.authorizeInteractively(timeout: 60, isCancelled: { polls += 1; return polls > 1 })) { error in
+            XCTAssertEqual(error as? GoogleAPIError, .unauthorized("sign-in cancelled"))
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5, "must not wait for the timeout")
+        XCTAssertEqual(auth.requests.count, 0)
+        XCTAssertNil(try TokenFile.read(env.tokenFile))
+    }
+
     func testBrowserOpenFailureDoesNotAbortFlow() throws {
         let auth = FakeTransport.script([(200, #"{"access_token":"A","refresh_token":"R","expires_in":3600}"#)])
         let env = try Env(token: nil, authTransport: auth)

@@ -38,7 +38,7 @@ render_plist() {
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>30</integer>
-  <key>ProcessType</key><string>Background</string>
+  <key>ProcessType</key><string>Interactive</string>
 ${env_block}  <key>StandardOutPath</key><string>$(xml_escape "$APP_HOME/logs/launchd.out.log")</string>
   <key>StandardErrorPath</key><string>$(xml_escape "$APP_HOME/logs/launchd.err.log")</string>
 </dict>
@@ -46,17 +46,12 @@ ${env_block}  <key>StandardOutPath</key><string>$(xml_escape "$APP_HOME/logs/lau
 PLIST
 }
 
-# The daemon cannot run before Google authorization; fail early instead of crash-looping.
-if [ ! -f "$APP_HOME/token.json" ]; then
-  msg="$APP_HOME/token.json not found: authorize Google first with
-  $REPO_ROOT/dist/icloud-gcal-sync auth
-(build it with scripts/build.sh), then re-run install.sh."
-  if [ "$DRY_RUN" = 1 ]; then
-    echo "[dry-run] a real run would stop here: $msg"
-  else
-    echo "error: $msg" >&2
-    exit 1
-  fi
+# Setup can be finished from the menu bar icon, so a missing Google sign-in is not an error.
+NEEDS_SETUP=""
+if [ ! -f "$APP_HOME/credentials.json" ]; then
+  NEEDS_SETUP=credentials
+elif [ ! -f "$APP_HOME/token.json" ]; then
+  NEEDS_SETUP=signin
 fi
 
 old_label="com.$(whoami).icloud-gcal-sync"
@@ -102,3 +97,11 @@ Next: macOS will ask once for calendar access, attributed to icloud-gcal-sync.
 Click Allow. The grant belongs to this launchd-started process and survives
 rebuilds as long as scripts/build.sh keeps using the same signing identity.
 MSG
+
+echo "A calendar icon is now in the menu bar: status, Sync Now and Refresh are there."
+if [ "$NEEDS_SETUP" = credentials ]; then
+  echo "Google is not set up yet: click the icon and pick \"Choose Google Credentials (JSON)…\","
+  echo "then sign in when the browser opens."
+elif [ "$NEEDS_SETUP" = signin ]; then
+  echo "Not signed in to Google yet: click the icon and pick \"Sign In to Google…\"."
+fi

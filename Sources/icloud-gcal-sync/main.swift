@@ -13,12 +13,14 @@ Commands:
   auth        Authorize Google in the browser and create the Google calendar
   calendars   List Apple calendars and show which ones are synced
   sync        Run one sync now
-  run         Stay running: sync on every Apple Calendar change and poll Google (used by launchd)
+  run         Stay running: sync on every Apple Calendar change and poll Google (used by launchd).
+              Shows a menu bar icon with status, Sync Now and setup
   status      Show configuration and the state of the last sync
 
 Options:
   --dry-run             (sync) show what would change without writing anything
   --allow-mass-delete   (sync) bypass the mass-deletion guards for this run
+  --headless            (run) no menu bar icon
   --home DIR            use DIR instead of ~/Library/Application Support/icloud-gcal-sync
   -v, --verbose         more logging
 """
@@ -43,6 +45,7 @@ func fail(_ message: String) -> Never {
 let verbose = flag("-v", "--verbose")
 let dryRun = flag("--dry-run")
 let allowMassDelete = flag("--allow-mass-delete")
+let headless = flag("--headless")
 let paths = AppPaths(root: option("--home").map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath, isDirectory: true) })
 if flag("-h", "--help") || args.isEmpty {
     print(usage)
@@ -86,13 +89,13 @@ do {
 
     case "sync":
         let rt = try Runtime(paths: paths)
-        let ok = rt.lockedCycle(SyncEngine.Options(dryRun: dryRun, allowMassDelete: allowMassDelete))
-        exit(ok ? 0 : 1)
+        let outcome = rt.lockedCycle(SyncEngine.Options(dryRun: dryRun, allowMassDelete: allowMassDelete))
+        exit(outcome.succeeded ? 0 : 1)
 
     case "run":
         // Kept in a variable: the daemon's timer and observers refer back to it for the life of the process.
         let daemon = Daemon(paths: paths)
-        daemon.run()
+        daemon.run(menuBar: !headless)
 
     case "status":
         print("home:             \(paths.root.path)")
